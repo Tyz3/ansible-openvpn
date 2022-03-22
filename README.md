@@ -15,6 +15,7 @@ _Руководство: https://www.dmosk.ru/miniinstruktions.php?mini=ubuntu-s
 # Запуск Playbook
 Установка OpenVPN
 ```ansible-playbook deploy.yml -i inventories/inv.yml```
+
 Создание конфига клиента
 ```ansible-playbook deploy_config.yml -i inventories/inv.yml```
 
