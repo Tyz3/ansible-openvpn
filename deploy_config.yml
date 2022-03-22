@@ -1,0 +1,35 @@
+---
+- name: Создание конфигурации OpenVPN клиента
+  hosts: all
+  become: no
+
+  vars:
+    clientName: 'Bumbleblossom'
+
+  tasks:
+
+  - name: Активация /etc/openvpn/client/make_config.sh {{ clientName }}
+    expect:
+      command: ./make_config.sh {{ clientName }}
+      chdir: /etc/openvpn/client
+      responses:
+        # Common Name (eg: your user, host, or server name) [Bumbleblossom]:
+        'Common Name .*:': ''
+        # Confirm request details:
+        'Confirm request details:': 'yes' 
+    register: makeResult
+
+  - debug:
+      var: makeResult
+
+  - name: Скачивание OpenVPN конфига {{ clientName }}.ovpn в downloads/
+    fetch:
+      src: /etc/openvpn/client/{{ clientName }}/{{ clientName }}.ovpn
+      dest: downloads/
+      flat: yes
+
+  - name: Установка прав на чтение и запись на downloads/
+    file:
+      path: /work
+      recurse: yes
+      mode: '0666'

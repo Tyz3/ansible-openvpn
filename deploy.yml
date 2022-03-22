@@ -1,0 +1,214 @@
+---
+#########################################################
+#######################-PLAY-1-##########################
+#########################################################
+- name: Обновление системы и установка пакетов
+  hosts: all
+
+  # Если yes - все действия через sudo
+  # Используем yes, если нет удалённого доступа к root
+  # become: no
+
+  # Сбор информации об узле
+  # gather_facts: no
+
+  # Переменные PLAY-1
+  # vars:
+  #   ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+  - name: Обновление системы update && upgrade
+    apt:
+      update_cache: yes
+      upgrade: yes
+
+  - name: Установка необходимых пакетов
+    apt:
+      name: '{{ item }}'
+    with_items:
+    - 'net-tools'
+    - 'htop'
+    - 'openvpn'
+    - 'easy-rsa'
+    - 'iptables'
+    - 'ipset'
+    - 'python3-pip'
+
+  - name: Установка python-модуля pexpect
+    pip:
+      name: pexpect
+
+  - name: Создание символической ссылки в /etc/openvpn на /usr/share/easy-rsa
+    file:
+      src: /usr/share/easy-rsa
+      dest: /etc/openvpn/easy-rsa
+      state: link
+
+  - name: Создание символической ссылки в ~/ на /etc/openvpn
+    file:
+      src: /etc/openvpn
+      dest: ~/openvpn
+      state: link
+
+
+#########################################################
+#######################-PLAY-2-##########################
+#########################################################
+- name: Настройка и инициализация EasyRSA
+  hosts: all
+
+  tasks:
+  - name: Отправка files/vars в /usr/share/easy-rsa
+    copy:
+      src: files/vars
+      dest: '/usr/share/easy-rsa/vars'
+
+  - name: Инициализация PKI -> ./easyrsa init-pki
+    command: ./easyrsa init-pki
+    args:
+      chdir: /usr/share/easy-rsa
+    register: initResult
+
+  - debug:
+      var: initResult.stdout_lines
+
+  - name: Создание корневого сертификата -> ./easyrsa build-ca nopass
+    expect:
+      command: ./easyrsa build-ca nopass
+      chdir: /usr/share/easy-rsa
+      responses:
+        # Common Name (eg: your user, host, or server name) [Easy-RSA CA]:
+        'Common Name .*:': 'Your CA Name'
+        # # Enter New CA Key Passphrase:
+        # 'Enter New CA Key Passphrase:': 'P@ssw0rd_ca' 
+        # # Re-Enter New CA Key Passphrase:
+        # 'Re\-Enter New CA Key Passphrase:': 'P@ssw0rd_ca'
+    register: buildCaResult
+
+  - debug:
+      var: buildCaResult.stdout_lines
+
+  - name: Создание ключей Диффи-Хеллмана -> ./easyrsa gen-dh
+    command: ./easyrsa gen-dh
+    args:
+      chdir: /usr/share/easy-rsa
+    timeout: 120
+    register: genDhResult
+
+  - debug:
+      var: genDhResult.stdout_lines
+
+  - name: Создание сертификата сервера (создание файла запроса) -> ./easyrsa gen-req ServerName nopass
+    expect:
+      command: ./easyrsa gen-req ServerName nopass
+      chdir: /usr/share/easy-rsa
+      responses:
+        # Common Name (eg: your user, host, or server name) [ServerName]:
+        'Common Name .*:': ''
+    register: genReqResult
+
+  - debug:
+      var: genReqResult.stdout_lines
+
+  - name: Создание сертификата сервера (подписание файла запроса) -> ./easyrsa sign-req server ServerName
+    expect:
+      command: ./easyrsa sign-req server ServerName
+      chdir: /usr/share/easy-rsa
+      responses:
+        # Confirm request details:
+        'Confirm request details:': 'yes'
+        # Enter pass phrase for /usr/share/easy-rsa/pki/private/ca.key:
+    register: signReqResult
+
+  - debug:
+      var: signReqResult.stdout_lines
+
+
+#########################################################
+#######################-PLAY-3-##########################
+#########################################################
+- name: Настройка и инициализация OpenVPN
+  hosts: all
+
+  tasks:
+  - name: Создание ключа аутентификации ta.key -> openvpn --genkey --secret pki/ta.key
+    command: openvpn --genkey --secret pki/ta.key
+    args:
+      chdir: /usr/share/easy-rsa
+
+  - name: Копирование ca.crt, dh.pem, ServerName.crt, ServerName.key, ta.key в /etc/openvpn
+    copy:
+      src: '{{ item.from }}'
+      dest: '{{ item.to }}'
+      remote_src: yes
+    loop:
+    - {from: "/usr/share/easy-rsa/pki/ca.crt", to: "/etc/openvpn/ca.crt"}
+    - {from: "/usr/share/easy-rsa/pki/dh.pem", to: "/etc/openvpn/dh.pem"}
+    - {from: "/usr/share/easy-rsa/pki/issued/ServerName.crt", to: "/etc/openvpn/ServerName.crt"}
+    - {from: "/usr/share/easy-rsa/pki/private/ServerName.key", to: "/etc/openvpn/ServerName.key"}
+    - {from: "/usr/share/easy-rsa/pki/ta.key", to: "/etc/openvpn/ta.key"}
+
+  - name: Отправка конфигурации OpenVPN files/server.conf в /etc/openvpn
+    copy:
+      src: 'files/server.conf'
+      dest: '/etc/openvpn/server.conf'
+
+  - name: Отправка базовой конфигурации OpenVPN клиента files/base.conf в /etc/openvpn/client
+    copy:
+      src: 'files/base.conf'
+      dest: '/etc/openvpn/client/base.conf'
+
+  - name: Замена %server_ip_here% в server.conf на 192.168.1.110
+    replace:
+      path: "{{ item }}"
+      regexp: "(%server_ip_here%)"
+      replace: "192.168.1.110"
+    with_items:
+    - '/etc/openvpn/server.conf'
+    - '/etc/openvpn/client/base.conf'
+
+  - name: Отправка скрипта создания конфигурации OpenVPN клиента files/make_config.sh в /etc/openvpn/client
+    copy:
+      src: 'files/make_config.sh'
+      dest: '/etc/openvpn/client/make_config.sh'
+      mode: '0755'
+
+  - name: Включение автозагрузки и запуск сервиса openvpn@server
+    systemd:
+      state: started
+      enabled: yes
+      name: openvpn@server
+
+
+#########################################################
+#######################-PLAY-4-##########################
+#########################################################
+- name: Настройка сети, включение маршрутизации, правила iptables
+  hosts: all
+
+  tasks:
+  - name: Включение маршрутизации -> sysctl net.ipv4.ip_forward=1
+    command: sysctl net.ipv4.ip_forward=1
+
+  - name: Включение маршрутизации после перезагрузки net.ipv4.ip_forward=1 (/etc/sysctl.conf)
+    lineinfile:
+      path: "/etc/sysctl.conf"
+      insertafter: "#net.ipv4.ip_forward=1"
+      line: "net.ipv4.ip_forward=1"
+
+  - name: Отправка скрипта настройки сети files/iptables.sh в ~/
+    copy:
+      src: 'files/iptables.sh'
+      dest: '~/iptables.sh'
+      mode: '0755'
+
+  - name: Активация iptables.sh (скрипт также создаёт дамп правил в /etc/iptables.dump)
+    shell:
+      cmd: ./iptables.sh
+      chdir: ~/
+    timeout: 10
+
+  - name: Добавление автозапуска правил iptables-restore
+    lineinfile:
+      path: /etc/network/interfaces
+      line: post-up /sbin/iptables-restore < /etc/iptables.dump
