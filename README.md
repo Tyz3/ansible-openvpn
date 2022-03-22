@@ -13,6 +13,9 @@ _(debian) Во время установки ОС нужно поставит г
 _Руководство: https://www.dmosk.ru/miniinstruktions.php?mini=ubuntu-ssh-root_
 
 # Запуск Playbook
+Установка OpenVPN
+```ansible-playbook deploy.yml -i inventories/inv.yml```
+Создание конфига клиента
 ```ansible-playbook deploy_config.yml -i inventories/inv.yml```
 
 # Примеры простых Ad-Hoc команд из консоли
