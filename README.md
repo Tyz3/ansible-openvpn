@@ -3,9 +3,7 @@
 Оффициальное руководство по установке для вашего дистрибутива:
 https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html#installing-ansible-on-specific-operating-systems
 
-Дополнительные пакеты для работы Ansible: python3, sshpass.
-
-Расположение конфигурации Ansible: **/etc/ansible/ansible.cfg**
+Дополнительные пакеты для работы Ansible: **python3**, **sshpass**.
 
 # Подготовка удалённого сервера
 
